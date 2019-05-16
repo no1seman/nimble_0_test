@@ -391,10 +391,11 @@ static int blecent_gap_event(struct ble_gap_event *event, void *arg)
         print_adv_fields(&fields);
 
         /* Try to connect to the advertiser if it looks interesting. */
-        blecent_connect_if_interesting(&event->disc);
+        //blecent_connect_if_interesting(&event->disc);
         return 0;
 
     case BLE_GAP_EVENT_CONNECT:
+        ESP_LOGI(tag, "BLE_GAP_EVENT_CONNECT");
         /* A new connection was established or a connection attempt failed. */
         if (event->connect.status == 0)
         {
@@ -433,6 +434,7 @@ static int blecent_gap_event(struct ble_gap_event *event, void *arg)
         return 0;
 
     case BLE_GAP_EVENT_DISCONNECT:
+        ESP_LOGI(tag, "BLE_GAP_EVENT_CONNECT");
         /* Connection terminated. */
         MODLOG_DFLT(INFO, "disconnect; reason=%d ", event->disconnect.reason);
         print_conn_desc(&event->disconnect.conn);
@@ -446,12 +448,12 @@ static int blecent_gap_event(struct ble_gap_event *event, void *arg)
         return 0;
 
     case BLE_GAP_EVENT_DISC_COMPLETE:
-        //ESP_LOGI(tag, "BLE_GAP_EVENT_DISC_COMPLETE");
-
+        ESP_LOGI(tag, "BLE_GAP_EVENT_DISC_COMPLETE");
         MODLOG_DFLT(INFO, "discovery complete; reason=%d\n", event->disc_complete.reason);
         return 0;
 
     case BLE_GAP_EVENT_ENC_CHANGE:
+        ESP_LOGI(tag, "BLE_GAP_EVENT_ENC_CHANGE");
         /* Encryption has been enabled or disabled for this connection. */
         MODLOG_DFLT(INFO, "encryption change event; status=%d ", event->enc_change.status);
         rc = ble_gap_conn_find(event->enc_change.conn_handle, &desc);
@@ -460,6 +462,7 @@ static int blecent_gap_event(struct ble_gap_event *event, void *arg)
         return 0;
 
     case BLE_GAP_EVENT_NOTIFY_RX:
+        ESP_LOGI(tag, "BLE_GAP_EVENT_NOTIFY_RX");
         /* Peer sent us a notification or indication. */
         MODLOG_DFLT(INFO, "received %s; conn_handle=%d attr_handle=%d "
                           "attr_len=%d\n",
@@ -472,6 +475,7 @@ static int blecent_gap_event(struct ble_gap_event *event, void *arg)
         return 0;
 
     case BLE_GAP_EVENT_MTU:
+        ESP_LOGI(tag, "BLE_GAP_EVENT_MTU");
         MODLOG_DFLT(INFO, "mtu update event; conn_handle=%d cid=%d mtu=%d\n",
                     event->mtu.conn_handle,
                     event->mtu.channel_id,
@@ -479,6 +483,7 @@ static int blecent_gap_event(struct ble_gap_event *event, void *arg)
         return 0;
 
     case BLE_GAP_EVENT_REPEAT_PAIRING:
+        ESP_LOGI(tag, "BLE_GAP_EVENT_REPEAT_PAIRING");
         /* We already have a bond with the peer, but it is attempting to
          * establish a new secure link.  This app sacrifices security for
          * convenience: just throw away the old bond and accept the new link.
@@ -495,6 +500,7 @@ static int blecent_gap_event(struct ble_gap_event *event, void *arg)
         return BLE_GAP_REPEAT_PAIRING_RETRY;
 
     default:
+        ESP_LOGI(tag, "Unknown event: %u", event->type);
         return 0;
     }
 }
@@ -526,6 +532,56 @@ void ble_host_task(void *param)
     ESP_LOGI(tag, "BLE Host Task Started");
     nimble_host_task(param);
 }
+
+void print_heap(const char *point)
+{
+    multi_heap_info_t *internal_ram = pvPortMalloc(sizeof(multi_heap_info_t));
+    memset(internal_ram, 0, sizeof(multi_heap_info_t));
+
+    heap_caps_get_info(internal_ram, MALLOC_CAP_INTERNAL);
+
+    ESP_LOGI(tag, "Internal memory: Free: %u bytes, Allocated: %u bytes, Mininum free: %u bytes, Largest free block: %u bytes", 
+            internal_ram->total_free_bytes, 
+            internal_ram->total_allocated_bytes, 
+            internal_ram->minimum_free_bytes, 
+            internal_ram->largest_free_block);
+
+    if (internal_ram)
+    {
+        vPortFree(internal_ram);
+        internal_ram = NULL;
+    }
+}
+
+#define BLINK_GPIO 5
+#define BLINK_GPIO_BIT_MASK (1ULL << BLINK_GPIO)
+#define BLINK_PERIOD (1000)   
+static uint32_t counter = 0;
+
+void static blink_task(void *pvParameter)
+{
+    gpio_pad_select_gpio(BLINK_GPIO);
+    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+
+    while (1)
+    {
+        counter++;
+        gpio_set_level(BLINK_GPIO, 0);
+        vTaskDelay(BLINK_PERIOD / portTICK_PERIOD_MS);
+        gpio_set_level(BLINK_GPIO, 1);
+        vTaskDelay(BLINK_PERIOD / portTICK_PERIOD_MS);
+
+        if (counter % 10 == 0)
+        {
+            print_heap("");
+        }
+    }
+
+    gpio_set_level(BLINK_GPIO, 0);
+    ESP_LOGI(tag, "Blink task stopped");
+    vTaskDelete(NULL);
+} 
+
 
 void app_main(void)
 {
@@ -559,4 +615,7 @@ void app_main(void)
     ble_store_config_init();
 
     nimble_port_freertos_init(ble_host_task);
+
+    xTaskCreate(&blink_task, "BLINK_TASK", 3072, NULL, 5, NULL);
+    ESP_LOGI(tag, "Blink task started");
 }
